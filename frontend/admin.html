@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geo Notes App</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <style>
+        #map {
+            height: 70vh; /* Adjust height to be more square-like */
+            width: 100%;
+        }
+    </style>
+</head>
+
+<body class="flex flex-col h-screen">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white flex items-center justify-between p-4">
+        <div class="flex items-center space-x-4">
+            <div class="text-xl font-bold">Geo Notes App</div>
+            <input type="text" placeholder="Search notes..." class="hidden md:block px-4 py-2 rounded">
+        </div>
+        <div class="flex items-center space-x-4">
+            <button id="menu-button" class="md:hidden focus:outline-none">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+                </svg>
+            </button>
+            <div class="hidden md:flex space-x-4">
+                <div class="cursor-pointer">Profile</div>
+                <div class="cursor-pointer">Settings</div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-grow overflow-hidden flex-col md:flex-row">
+
+        <!-- Sidebar -->
+        <aside id="sidebar" class="bg-gray-100 w-full md:w-64 p-4 overflow-y-auto md:h-auto h-auto md:flex flex-col md:static fixed top-16 left-0 md:left-auto md:top-auto hidden md:block">
+            <div class="mb-4">
+                <div class="font-semibold mb-2">Filters</div>
+                <div>
+                    <label class="block"><input type="checkbox" class="mr-2"> Text Notes</label>
+                    <label class="block"><input type="checkbox" class="mr-2"> Shopping Centers</label>
+                    <label class="block"><input type="checkbox" class="mr-2"> Concert Info</label>
+                    <label class="block"><input type="checkbox" class="mr-2"> Ads</label>
+                </div>
+            </div>
+            <div>
+                <div class="font-semibold mb-2">Proximity Filter</div>
+                <div>
+                    <button class="bg-blue-500 text-white px-4 py-2 rounded mr-2 mb-2 md:mb-0">500m</button>
+                    <button class="bg-blue-500 text-white px-4 py-2 rounded mr-2 mb-2 md:mb-0">1km</button>
+                    <button class="bg-blue-500 text-white px-4 py-2 rounded">5km</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="flex-grow flex flex-col">
+            <!-- Map Area -->
+            <div id="map" class="flex-grow"></div>
+
+            <!-- Nearby Data Panel -->
+            <div class="bg-white p-4 border-t border-gray-300 overflow-y-auto h-48 md:h-auto md:relative">
+                <div class="font-semibold mb-4">Nearby Notes</div>
+                <div id="nearby-notes" class="space-y-4">
+                    <!-- Nearby notes will be injected here -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var map = L.map('map').setView([45.8150, 15.9819], 13); // Centered on Zagreb
+
+            // Load and display tile layer on the map (OpenStreetMap by default)
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+
+            // Fetch all notes
+            fetch('http://localhost:4000/v1/notes')
+                .then(response => response.json())
+                .then(data => {
+                    data.notes.forEach(note => {
+                        var marker = L.circleMarker([note.latitude, note.longitude], {
+                            color: 'blue',
+                            radius: 8,
+                            fillColor: 'blue',
+                            fillOpacity: 0.5
+                        }).addTo(map);
+
+                        marker.bindPopup(`<strong>Note:</strong> ${note.text}<br><strong>Created At:</strong> ${note.created_at}`);
+                    });
+                })
+                .catch(error => console.error('Error loading the notes:', error));
+
+            // Fetch nearby notes and zoom to fit
+            fetch(`http://localhost:4000/v1/notes/nearby?latitude=45.8150&longitude=15.9819`)
+                .then(response => response.json())
+                .then(data => {
+                    var nearbyNotesBounds = L.latLngBounds();
+                    var nearbyNotesContainer = document.getElementById('nearby-notes');
+
+                    data.notes.forEach(note => {
+                        var marker = L.circleMarker([note.latitude, note.longitude], {
+                            color: 'red',
+                            radius: 8,
+                            fillColor: 'red',
+                            fillOpacity: 0.5
+                        }).addTo(map);
+
+                        marker.bindPopup(`<strong>Note:</strong> ${note.text}<br><strong>Created At:</strong> ${note.created_at}`);
+
+                        // Extend bounds
+                        nearbyNotesBounds.extend([note.latitude, note.longitude]);
+
+                        // Add to nearby notes container
+                        var noteElement = document.createElement('div');
+                        noteElement.classList.add('border', 'p-4', 'rounded');
+                        noteElement.innerHTML = `
+                            <div class="font-semibold">${note.text}</div>
+                            <div>Type: ${note.type}</div>
+                            <div>Summary: ${note.summary}</div>
+                            <button class="text-blue-500 mt-2">More Details</button>
+                        `;
+                        nearbyNotesContainer.appendChild(noteElement);
+                    });
+
+                    // Zoom map to fit all nearby notes
+                    if (nearbyNotesBounds.isValid()) {
+                        map.fitBounds(nearbyNotesBounds);
+                    }
+                })
+                .catch(error => console.error('Error loading nearby notes:', error));
+
+            // Toggle sidebar
+            document.getElementById('menu-button').addEventListener('click', function () {
+                var sidebar = document.getElementById('sidebar');
+                sidebar.classList.toggle('hidden');
+            });
+        });
+    </script>
+</body>
+
+</html>

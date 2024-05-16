@@ -1,0 +1,12 @@
+CREATE TABLE notes (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMP(0) WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    user_id BIGINT NOT NULL,
+    latitude DOUBLE PRECISION NOT NULL,
+    longitude DOUBLE PRECISION NOT NULL,
+    text TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+ALTER TABLE notes
+ADD COLUMN location GEOGRAPHY(Point, 4326);
