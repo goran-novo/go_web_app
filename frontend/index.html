@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Geo Notes App</title>
     <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 
 <body class="flex flex-col h-screen">
@@ -66,19 +68,44 @@
                 </div>
             </div>
 
-            <div id="nearby-notes" class="space-y-4 overflow-y-auto flex-grow">
+            <div id="nearby-notes" class="space-y-4 overflow-y-auto flex-grow h-64 md:h-auto">
                 <!-- Nearby notes will be injected here -->
             </div>
+
+           <!-- Add Note Button -->
+            <button id="add-note-button" class="bg-green-500 text-white px-4 py-2 rounded mt-4">Add New Note</button>
+
+            <!-- Add Note Form (Hidden by default) -->
+            <div id="add-note-form-container" class="mt-8 p-4 border rounded bg-white hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-semibold">Add New Note</h2>
+                    <button id="close-add-note-button" class="text-red-500">X</button>
+                </div>
+                <form id="add-note-form">
+                    <div class="mb-4">
+                        <label for="text" class="block text-gray-700">Note Text</label>
+                        <input type="text" id="text" name="text" required class="mt-1 px-4 py-2 border rounded w-full">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700">Select Location</label>
+                        <div id="mini-map" class="h-48 w-full border rounded"></div>
+                    </div>
+                    <input type="hidden" id="latitude" name="latitude">
+                    <input type="hidden" id="longitude" name="longitude">
+                    <button type="submit" class="bg-blue-500 text-white px-4 py-2 rounded w-full">Add Note</button>
+                </form>
+                <div id="add-note-error" class="text-red-500 mt-4 hidden"></div>
+            </div>
+
         </main>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', function () {
-
+            // Check for token in localStorage
             const token = localStorage.getItem('authToken');
-            console.log("local storage token : " + token);
             if (!token) {
-                window.location.href = '/login.html';
+                window.location.href = 'login.html';
                 return;
             }
 
@@ -88,29 +115,141 @@
                 sidebar.classList.toggle('hidden');
             });
 
-            // Fetch nearby notes
-            fetch(`http://localhost:4000/v1/notes/nearby?latitude=45.8150&longitude=15.9819`, { 
-             headers: {
+            // Fetch nearby notes with authorization header
+            fetch(`http://localhost:4000/v1/notes/nearby?latitude=45.8150&longitude=15.9819`, {
+                headers: {
                     'Authorization': `Bearer ${token}`
                 }
             })
+            .then(response => response.json())
+            .then(data => {
+                var nearbyNotesContainer = document.getElementById('nearby-notes');
+
+                data.notes.forEach(note => {
+                    var noteElement = document.createElement('div');
+                    noteElement.classList.add('border', 'p-4', 'rounded');
+                    noteElement.innerHTML = `
+                        <div class="font-semibold">${note.text}</div>
+                        <div>Type: ${note.type}</div>
+                        <div>Summary: ${note.summary}</div>
+                        <button class="text-blue-500 mt-2">More Details</button>
+                    `;
+                    nearbyNotesContainer.appendChild(noteElement);
+                });
+            })
+            .catch(error => console.error('Error loading nearby notes:', error));
+
+            // Mini map for selecting location
+            var miniMap = L.map('mini-map').setView([45.8150, 15.9819], 13);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(miniMap);
+
+            var marker;
+
+            miniMap.on('click', function(e) {
+                var lat = e.latlng.lat;
+                var lng = e.latlng.lng;
+
+                if (marker) {
+                    miniMap.removeLayer(marker);
+                }
+
+                marker = L.marker([lat, lng]).addTo(miniMap);
+
+                document.getElementById('latitude').value = lat;
+                document.getElementById('longitude').value = lng;
+            });
+
+            // Add note form submission
+            document.getElementById('add-note-form').addEventListener('submit', function (event) {
+                event.preventDefault();
+
+                const text = document.getElementById('text').value;
+                const latitude = document.getElementById('latitude').value;
+                const longitude = document.getElementById('longitude').value;
+
+                fetch('http://localhost:4000/v1/notes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ text, latitude: parseFloat(latitude), longitude: parseFloat(longitude) })
+                })
                 .then(response => response.json())
                 .then(data => {
-                    var nearbyNotesContainer = document.getElementById('nearby-notes');
+                    if (data.note) {
+                        // Refresh nearby notes or add the new note to the list
+                        var nearbyNotesContainer = document.getElementById('nearby-notes');
 
-                    data.notes.forEach(note => {
                         var noteElement = document.createElement('div');
                         noteElement.classList.add('border', 'p-4', 'rounded');
                         noteElement.innerHTML = `
-                            <div class="font-semibold">${note.text}</div>
-                            <div>Type: ${note.type}</div>
-                            <div>Summary: ${note.summary}</div>
+                            <div class="font-semibold">${data.note.text}</div>
+                            <div>Type: ${data.note.type}</div>
+                            <div>Summary: ${data.note.summary}</div>
                             <button class="text-blue-500 mt-2">More Details</button>
                         `;
                         nearbyNotesContainer.appendChild(noteElement);
-                    });
+
+                        // Clear the form
+                        document.getElementById('add-note-form').reset();
+                        if (marker) {
+                            miniMap.removeLayer(marker);
+                        }
+                    } else {
+                        document.getElementById('add-note-error').textContent = 'Error adding note. Please try again.';
+                        document.getElementById('add-note-error').classList.remove('hidden');
+                    }
                 })
-                .catch(error => console.error('Error loading nearby notes:', error));
+                .catch(error => {
+                    document.getElementById('add-note-error').textContent = 'Error adding note. Please try again.';
+                    document.getElementById('add-note-error').classList.remove('hidden');
+                    console.error('Error:', error);
+                });
+            });
+
+            document.getElementById('add-note-button').addEventListener('click', function () {
+                document.getElementById('add-note-form-container').classList.remove('hidden');
+                document.getElementById('add-note-button').classList.add('hidden');
+
+                // Initialize mini map for selecting location
+                var miniMap = L.map('mini-map').setView([45.8150, 15.9819], 13);
+
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap contributors'
+                }).addTo(miniMap);
+
+                var marker;
+                miniMap.on('click', function(e) {
+                    var lat = e.latlng.lat;
+                    var lng = e.latlng.lng;
+
+                    if (marker) {
+                        miniMap.removeLayer(marker);
+                    }
+
+                    marker = L.marker([lat, lng]).addTo(miniMap);
+
+                    document.getElementById('latitude').value = lat;
+                    document.getElementById('longitude').value = lng;
+                });
+
+                // Fix map resize issue
+                setTimeout(() => {
+                    miniMap.invalidateSize();
+                }, 0);
+            });
+
+            // Close add note form
+            document.getElementById('close-add-note-button').addEventListener('click', function () {
+                document.getElementById('add-note-form-container').classList.add('hidden');
+                document.getElementById('add-note-button').classList.remove('hidden');
+            });
         });
     </script>
 </body>
